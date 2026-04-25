@@ -28,6 +28,28 @@ def _read_lines(path: Path) -> list[str]:
     return lines
 
 
+def _decrypt_to_lines(enc_path: Path, passphrase: str) -> list[str]:
+    """Decrypt *enc_path* using *passphrase* and return its lines.
+
+    Uses a temporary directory so the plaintext never persists on disk beyond
+    the scope of this helper.
+
+    Raises
+    ------
+    DiffError
+        If decryption fails for any reason.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_plain = Path(tmp) / "vault_plain.env"
+        try:
+            unlock(enc_path, passphrase, output_path=tmp_plain)
+        except Exception as exc:  # noqa: BLE001
+            raise DiffError(f"Failed to decrypt vault file: {exc}") from exc
+        return _read_lines(tmp_plain)
+
+
 def diff_env(
     env_path: Path,
     enc_path: Path,
@@ -58,19 +80,7 @@ def diff_env(
     if not enc_path.exists():
         raise DiffError(f"Encrypted file not found: {enc_path}")
 
-    # Decrypt into a temporary in-memory path using a BytesIO buffer trick:
-    # unlock() writes to a Path, so we use a temp file approach via tmp dir.
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_plain = Path(tmp) / "vault_plain.env"
-        try:
-            unlock(enc_path, passphrase, output_path=tmp_plain)
-        except Exception as exc:  # noqa: BLE001
-            raise DiffError(f"Failed to decrypt vault file: {exc}") from exc
-
-        vault_lines = _read_lines(tmp_plain)
-
+    vault_lines = _decrypt_to_lines(enc_path, passphrase)
     current_lines = _read_lines(env_path)
 
     diff_lines: Sequence[str] = list(
